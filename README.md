@@ -2,9 +2,19 @@
 
 # It is totally dope
 
-This project uses the SDL2 library to build a snake game.
-
-compilation command (to be added to makefile):
-
-g++ main.cpp ./lib/Vector2.cpp -o ./executables/sdl_demo `sdl2-config --cflags --libs` -lSDL2_image -lSDL2_ttf -lSDL2_mixer
-
+You can now build this project using make but will need to install make prior:
+```bash
+sudo apt update && sudo apt install -y make
+```
+Then the project can be built simply by running:
+```bash
+make
+```
+Then to clear out old executables run:
+```bash
+make clean
+```
+Then running the game itself:
+```bash
+./executables/snake
+```
