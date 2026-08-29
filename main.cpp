@@ -7,9 +7,9 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
-#include "lib/Vector2.h"
+#include "include/Vector2.h"
 
-int main(int argc, char* argv[]) {
+int main() {
     // Init SDL systems
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0 ||
         IMG_Init(IMG_INIT_PNG) != IMG_INIT_PNG ||
@@ -26,15 +26,15 @@ int main(int argc, char* argv[]) {
     SDL_Window* window = SDL_CreateWindow("SDL2 Demo", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, windowWidth, windowHeight, SDL_WINDOW_SHOWN);
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 
-    // // Load image texture
-    // SDL_Texture* image = IMG_LoadTexture(renderer, "display/spaceship.png");  // PNG file in same folder
-    // if (!image) {
-    //     std::cerr << "Image load error: " << IMG_GetError() << "\n";
-    // }
+    // Load image texture
+    SDL_Texture* image = IMG_LoadTexture(renderer, "./display/spaceship.png");  // PNG file in same folder
+    if (!image) {
+        std::cerr << "Image load error: " << IMG_GetError() << "\n";
+    }
     
     // Load font and create a texture from text
     TTF_Font* font = TTF_OpenFont("display/OpenSans-Regular.ttf", 28); // Include a .ttf font
-    SDL_Color white = {255, 255, 255};
+    SDL_Color white = SDL_Color{(Uint8)255U, (Uint8)255U, (Uint8)255U, (Uint8)255U};
     SDL_Surface* textSurface = TTF_RenderText_Blended(font, "Hello SDL2 using vector2 22", white);
     SDL_Texture* textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
     SDL_Rect textRect = {50, 50, textSurface->w, textSurface->h};
@@ -61,7 +61,7 @@ int main(int argc, char* argv[]) {
     snakeLocs.push_back(snakeLoc);
     snakeLocs.push_back(snakeLoc2);
     Direction snakeDir = UP;
-    int numSegs = 1;
+    // int numSegs = 1;
     Vector2 pelletLoc = Vector2(rand() % windowWidth + 1, rand() % windowHeight + 1);
 
     while (!quit) {
@@ -123,7 +123,7 @@ int main(int argc, char* argv[]) {
         SDL_RenderClear(renderer);
 
         // Draw filled rectangle
-        for (int i = 0; i < snakeLocs.size(); i++) {
+        for (uint i = 0; i < snakeLocs.size(); i++) {
             SDL_Rect rect = {snakeLocs[i].x, snakeLocs[i].y, 10, 10};
             SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255); // white
             SDL_RenderFillRect(renderer, &rect);
@@ -140,11 +140,11 @@ int main(int argc, char* argv[]) {
         SDL_RenderCopy(renderer, textTexture, NULL, &textRect);
 
 
-        // // Draw image
-        // if (image) {
-        //     SDL_Rect imgRect = {imageLoc.x, imageLoc.y, imageWidth, imageHeight};
-        //     SDL_RenderCopy(renderer, image, NULL, &imgRect);
-        // }
+        // Draw image
+        if (image) {
+            SDL_Rect imgRect = {10, 10, 30, 30};
+            SDL_RenderCopy(renderer, image, NULL, &imgRect);
+        }
 
 
         // Present the frame
