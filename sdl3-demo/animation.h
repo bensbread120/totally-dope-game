@@ -22,4 +22,6 @@ public:
 	void step(float deltaTime) {
 		timer.step(deltaTime);
 	}
+
+	bool isDone() { return timer.isTimeout(); }
 };

@@ -14,6 +14,11 @@ enum class BulletState
 	moving, colliding, inactive
 };
 
+enum class EnemyState
+{
+	shambling, damaged, dead
+};
+
 struct PlayerData
 {
 	PlayerState state;
@@ -25,7 +30,11 @@ struct PlayerData
 };
 
 struct LevelData {};
-struct EnemyData {};
+struct EnemyData {
+	EnemyState state;
+	EnemyData() : state(EnemyState::shambling) {}
+};
+
 struct BulletData {
 	BulletState state;
 	BulletData() : state(BulletState::moving) {}
