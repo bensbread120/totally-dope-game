@@ -1,8 +1,5 @@
 #pragma once
-#include <glm/glm.hpp>
-#include <vector>
-#include <SDL3/SDL.h>
-#include "animation.h"
+#include "engine/entity.h"
 
 enum class PlayerState
 {
@@ -21,31 +18,36 @@ enum class EnemyState
 
 struct PlayerData
 {
-	PlayerState state;
+	PlayerState state = PlayerState::idle;
 	Timer weaponTimer;
-	PlayerData() : weaponTimer(0.1f)
-	{
-		state = PlayerState::idle;
-	}
+	PlayerData() : weaponTimer(0.1f) {}
 };
 
 struct LevelData {};
-struct EnemyData {
-	EnemyState state;
-	EnemyData() : state(EnemyState::shambling) {}
+
+struct EnemyData
+{
+	EnemyState state = EnemyState::shambling;
 };
 
-struct BulletData {
-	BulletState state;
-	BulletData() : state(BulletState::moving) {}
+struct BulletData
+{
+	BulletState state = BulletState::moving;
 };
 
-union ObjectData 
+union ObjectData
 {
 	PlayerData player;
 	EnemyData enemy;
 	LevelData level;
 	BulletData bullet;
+
+	// PlayerData has a user-defined default constructor, so the compiler
+	// can no longer generate one for the union for free -- it has no way
+	// to know which member you mean. This is what your original
+	// GameObject() constructor was working around with
+	// `data{ .level = LevelData() }`.
+	ObjectData() : level{} {}
 };
 
 enum class ObjectType
@@ -56,30 +58,15 @@ enum class ObjectType
 	Bullet
 };
 
+// Deliberately still platformer-specific: `type`, `data`, and `grounded`
+// only mean something in a side-scroller. The part that's identical
+// between this game and the top-down one -- position, velocity, sprite,
+// animation, collider -- now lives in engine::Entity, so the top-down
+// game's equivalent struct can reuse it instead of copy-pasting it.
 struct GameObject
 {
-	ObjectType type;
+	engine::Entity entity;
+	ObjectType type = ObjectType::level;
 	ObjectData data;
-	glm::vec2 position, velocity, acceleration;
-	float direction;
-	float maxSpeedX;
-	std::vector<Animation> animations;
-	int currentAnimation;
-	SDL_Texture* texture;
-	bool dynamic;
-	bool grounded;
-	SDL_FRect collider;
-
-
-	GameObject() : data{ .level = LevelData(), }, collider{ 0, 0, 0, 0 }
-	{
-		type = ObjectType::level;
-		direction = 1;
-		maxSpeedX = 0;
-		position = velocity = acceleration = glm::vec2(0.0f);
-		currentAnimation = -1;
-		texture = nullptr;
-		dynamic = false;
-		grounded = false;
-	}
+	bool grounded = false;
 };
