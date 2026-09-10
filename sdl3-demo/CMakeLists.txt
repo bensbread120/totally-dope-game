@@ -7,7 +7,7 @@ find_package(glm REQUIRED)
 #
 
 # Add source to this project's executable.
-add_executable (sdl3-demo "sdl3-demo.cpp" "sdl3-demo.h" "timer.h" "animation.h" "engine\camera.h" "engine\entity.h" "engine\collsion.h" "engine\texture_cache.h")
+add_executable (sdl3-demo "sdl3-demo.cpp" "sdl3-demo.h" "timer.h" "animation.h" "engine/sdl_app.h" "engine/camera.h" "engine/entity.h" "engine/collision.h" "engine/texture_cache.h")
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
   set_property(TARGET sdl3-demo PROPERTY CXX_STANDARD 20)

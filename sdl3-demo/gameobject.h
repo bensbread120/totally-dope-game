@@ -1,72 +1,68 @@
 #pragma once
 #include "engine/entity.h"
 
-enum class PlayerState
-{
-	idle, running, jumping
-};
+// Four-directional facing, kept orthogonal to whether the entity is
+// currently moving. Deliberately not combined into one enum (e.g.
+// WalkingUp/IdleUp/...) -- that would double in size the moment you add a
+// third state like Attacking, whereas MovementState x Direction stays a
+// simple pair.
+enum class Direction { Up, Down, Left, Right };
+enum class MovementState { Idle, Walking };
 
-enum class BulletState
+inline glm::vec2 directionVector(Direction dir)
 {
-	moving, colliding, inactive
-};
-
-enum class EnemyState
-{
-	shambling, damaged, dead
-};
+	switch (dir)
+	{
+		case Direction::Up:    return glm::vec2(0.0f, -1.0f);
+		case Direction::Down:  return glm::vec2(0.0f, 1.0f);
+		case Direction::Left:  return glm::vec2(-1.0f, 0.0f);
+		case Direction::Right: return glm::vec2(1.0f, 0.0f);
+	}
+	return glm::vec2(0.0f, 1.0f);
+}
 
 struct PlayerData
 {
-	PlayerState state = PlayerState::idle;
-	Timer weaponTimer;
-	PlayerData() : weaponTimer(0.1f) {}
+	MovementState state = MovementState::Idle;
+	Direction direction = Direction::Down;
 };
-
-struct LevelData {};
 
 struct EnemyData
 {
-	EnemyState state = EnemyState::shambling;
+	MovementState state = MovementState::Idle;
+	Direction direction = Direction::Down;
+	Timer wanderTimer;
+	EnemyData() : wanderTimer(1.5f) {}
 };
 
-struct BulletData
-{
-	BulletState state = BulletState::moving;
-};
+struct WallData {};
 
 union ObjectData
 {
 	PlayerData player;
 	EnemyData enemy;
-	LevelData level;
-	BulletData bullet;
+	WallData wall;
 
-	// PlayerData has a user-defined default constructor, so the compiler
-	// can no longer generate one for the union for free -- it has no way
-	// to know which member you mean. This is what your original
-	// GameObject() constructor was working around with
-	// `data{ .level = LevelData() }`.
-	ObjectData() : level{} {}
+	// EnemyData has a user-defined default constructor (for wanderTimer),
+	// so -- same reason as the platformer -- the union needs an explicit
+	// default constructor of its own; the compiler can't pick a member for
+	// you once one of them isn't trivial to construct.
+	ObjectData() : wall{} {}
 };
 
-enum class ObjectType
-{
-	Player,
-	Enemy,
-	level,
-	Bullet
-};
+enum class ObjectType { Player, Enemy, Wall };
 
-// Deliberately still platformer-specific: `type`, `data`, and `grounded`
-// only mean something in a side-scroller. The part that's identical
-// between this game and the top-down one -- position, velocity, sprite,
-// animation, collider -- now lives in engine::Entity, so the top-down
-// game's equivalent struct can reuse it instead of copy-pasting it.
 struct GameObject
 {
 	engine::Entity entity;
-	ObjectType type = ObjectType::level;
+	ObjectType type = ObjectType::Wall;
 	ObjectData data;
-	bool grounded = false;
+};
+
+// Floor tiles are purely decorative: they never move, animate, or collide,
+// so they don't need the full weight of engine::Entity.
+struct TileSprite
+{
+	glm::vec2 position;
+	SDL_Texture* texture;
 };
