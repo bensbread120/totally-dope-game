@@ -2,7 +2,7 @@
 #include <glm/glm.hpp>
 #include <SDL3/SDL.h>
 #include <vector>
-#include "animation.h"
+#include "../animation.h"
 
 namespace engine {
 

@@ -15,11 +15,17 @@ class TextureCache
 	std::vector<SDL_Texture*> textures;
 
 public:
+	// `filepath` is relative to the executable's folder (the build copies
+	// assets/ there), not the current working directory -- so the game
+	// finds its textures however it's launched.
 	SDL_Texture* load(SDL_Renderer* renderer, const std::string& filepath,
 	                   SDL_ScaleMode scaleMode = SDL_SCALEMODE_NEAREST)
 	{
-		SDL_Log("Loading texture: %s", filepath.c_str());
-		SDL_Texture* tex = IMG_LoadTexture(renderer, filepath.c_str());
+		const char* basePath = SDL_GetBasePath();
+		std::string fullPath = basePath ? basePath + filepath : filepath;
+
+		SDL_Log("Loading texture: %s", fullPath.c_str());
+		SDL_Texture* tex = IMG_LoadTexture(renderer, fullPath.c_str());
 		if (!tex)
 		{
 			SDL_Log("FAILED: %s", SDL_GetError());

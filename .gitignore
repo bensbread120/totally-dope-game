@@ -70,3 +70,7 @@ Testing/
 
 # visual studio
 .vs/
+out/
+
+# user specific cmake presets
+CMakeUserPresets.json
