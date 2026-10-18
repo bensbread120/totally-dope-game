@@ -268,25 +268,16 @@ void updateEnemy(const SDLState& state, GameState& gs, Resources& res, GameObjec
 {
 	engine::Entity& e = obj.entity;
 	EnemyData& enemy = obj.data.enemy;
-
-	if (enemy.wanderTimer.step(deltaTime))
-	{
-		// most rolls pick a new walking direction, one in five just pauses
-		int roll = SDL_rand(5);
-		if (roll == 0)
-		{
-			enemy.state = MovementState::Idle;
-		}
-		else
-		{
-			enemy.state = MovementState::Walking;
-			enemy.direction = static_cast<Direction>(SDL_rand(4));
-		}
-		// re-armed with a new random length each time, which is why this
-		// constructs a fresh Timer instead of calling reset() -- reset()
-		// keeps the existing length, and the whole point here is variety
-		enemy.wanderTimer = Timer(1.0f + SDL_randf() * 1.5f);
+	
+	enemy.state = MovementState::Walking;
+	Path* path = findPath(gs.pathfinder, e.id);
+	if (path == nullptr || path->pathIndex >= static_cast<int>(path->path.size())) { // no path, or reached its end
+		enemy.state = MovementState::Idle;
+		return;
 	}
+
+	enemy.direction = path->path[path->pathIndex];
+	path->pathIndex += 1;
 
 	// a wall collision below will zero this out again via resolveAxisAligned,
 	// so a blocked enemy just sits at the wall until the timer next fires --
