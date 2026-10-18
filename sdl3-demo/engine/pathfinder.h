@@ -18,3 +18,4 @@ struct Pathfinder {
 
 void initialisePath(Pathfinder& pf, const GameObject& obj);
 void updatePaths(GameState& gs);
+Path* findPath(Pathfinder& pf, int id);
