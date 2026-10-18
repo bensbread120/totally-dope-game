@@ -3,36 +3,13 @@
 // and this file's rendering/animation lookups are the only things that
 // need to change.
 //
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_main.h>
-#include <SDL3_image/SDL_image.h>
-#include "engine/sdl_app.h"
-#include "engine/collision.h"
-#include "engine/camera.h"
-#include "engine/texture_cache.h"
-#include "gameobject.h"
-#include <vector>
-#include <cassert>
-#include <cmath>
-#include <format>
+#include "sdl3-demo.h"
 
 using engine::SDLState;
 
 const int MAP_ROWS = 14;
 const int MAP_COLS = 18;
 const int TILE_SIZE = 32;
-
-struct GameState
-{
-	std::vector<GameObject> walls;      // collidable
-	std::vector<TileSprite> floorTiles; // decorative only, never checked for collision
-	std::vector<GameObject> characters; // player + enemies
-	int playerIdx = -1;
-	engine::Camera camera;
-	bool debugMode = false;
-
-	GameObject& getPlayer() { return characters[playerIdx]; }
-};
 
 struct Resources
 {
@@ -77,7 +54,7 @@ void update(const SDLState& state, GameState& gs, Resources& res, GameObject& ob
 void updatePlayer(const SDLState& state, GameState& gs, Resources& res, GameObject& obj, float deltaTime);
 void updateEnemy(const SDLState& state, GameState& gs, Resources& res, GameObject& obj, float deltaTime);
 void moveAndCollide(GameState& gs, GameObject& obj, float deltaTime);
-void createMap(const SDLState& state, GameState& gs, Resources& res);
+void initialiseGameState(const SDLState& state, GameState& gs, Resources& res);
 
 int main(int argc, char* argv[])
 {
@@ -96,7 +73,7 @@ int main(int argc, char* argv[])
 
 	GameState gs;
 	gs.camera.viewport = SDL_FRect{ 0, 0, static_cast<float>(state.logW), static_cast<float>(state.logH) };
-	createMap(state, gs, resources);
+	initialiseGameState(state, gs, resources);
 
 	uint64_t previousTime = SDL_GetTicks();
 	bool running = true;
@@ -125,6 +102,8 @@ int main(int argc, char* argv[])
 					break;
 			}
 		}
+
+		updatePaths(gs);
 
 		// movement here is continuous (state.keys polled every frame in
 		// updatePlayer) rather than the platformer's edge-triggered jump,
@@ -336,8 +315,10 @@ void moveAndCollide(GameState& gs, GameObject& obj, float deltaTime)
 	}
 }
 
-void createMap(const SDLState& state, GameState& gs, Resources& res)
+void initialiseGameState(const SDLState& state, GameState& gs, Resources& res)
 {
+	gs.pathfinder = Pathfinder{};
+	
 	/*
 		0 = floor (walkable)
 		1 = wall (blocks movement)
@@ -346,7 +327,7 @@ void createMap(const SDLState& state, GameState& gs, Resources& res)
 	*/
 	short map[MAP_ROWS][MAP_COLS] = {
 		1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-		1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+		1,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
 		1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
 		1,0,0,1,1,0,0,0,0,0,0,0,0,1,1,0,0,1,
 		1,0,0,1,1,0,0,0,0,0,0,0,0,1,1,0,0,1,
@@ -354,7 +335,7 @@ void createMap(const SDLState& state, GameState& gs, Resources& res)
 		1,0,0,0,0,0,3,0,0,0,0,2,0,0,0,0,0,1,
 		1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
 		1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-		1,0,0,1,1,0,0,0,0,0,0,0,0,1,1,0,0,1,
+		1,0,0,1,1,0,0,0,0,3,0,0,0,1,1,0,0,1,
 		1,0,0,1,1,0,0,0,0,0,0,0,0,1,1,0,0,1,
 		1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
 		1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
@@ -395,6 +376,7 @@ void createMap(const SDLState& state, GameState& gs, Resources& res)
 					player.entity.maxSpeed = glm::vec2(120.0f, 120.0f);
 					player.entity.collider = SDL_FRect{ 8, 8, 16, 16 };
 					gs.characters.push_back(player);
+					gs.pathfinder.targetLocation = player.entity.position;
 					gs.playerIdx = static_cast<int>(gs.characters.size()) - 1;
 					break;
 				}
@@ -410,6 +392,7 @@ void createMap(const SDLState& state, GameState& gs, Resources& res)
 					enemy.entity.maxSpeed = glm::vec2(60.0f, 60.0f);
 					enemy.entity.collider = SDL_FRect{ 8, 8, 16, 16 };
 					gs.characters.push_back(enemy);
+					initialisePath(gs.pathfinder, enemy);
 					break;
 				}
 				default: break; // 0 = floor, nothing else to place

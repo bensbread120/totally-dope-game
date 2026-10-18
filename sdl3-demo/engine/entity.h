@@ -2,6 +2,7 @@
 #include <glm/glm.hpp>
 #include <SDL3/SDL.h>
 #include <vector>
+#include <atomic>
 #include "../animation.h"
 
 namespace engine {
@@ -12,6 +13,9 @@ namespace engine {
 // player, an enemy, or a wall is -- that vocabulary belongs to each game.
 struct Entity
 {
+	inline static std::atomic<int> next_id{ 1 };
+	
+	int id = next_id++;
 	glm::vec2 position{ 0.0f };
 	glm::vec2 velocity{ 0.0f };
 	glm::vec2 acceleration{ 0.0f };

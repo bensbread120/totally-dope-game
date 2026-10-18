@@ -4,7 +4,7 @@
 # SDL3, SDL3_image and glm are made available by the top-level CMakeLists.txt.
 
 # Add source to this project's executable.
-add_executable (sdl3-demo "sdl3-demo.cpp" "sdl3-demo.h" "timer.h" "animation.h" "engine/sdl_app.h" "engine/camera.h" "engine/entity.h" "engine/collision.h" "engine/texture_cache.h")
+add_executable (sdl3-demo "sdl3-demo.cpp" "sdl3-demo.h" "timer.h" "animation.h" "engine/sdl_app.h" "engine/camera.h" "engine/entity.h" "engine/collision.h" "engine/texture_cache.h" "engine/pathfinder.h" "engine/pathfinder.cpp" "engine/gamestate.h")
 
 set_target_properties(sdl3-demo PROPERTIES
   CXX_STANDARD 20
