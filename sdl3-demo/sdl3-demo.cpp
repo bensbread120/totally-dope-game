@@ -11,6 +11,7 @@
 #include "engine/camera.h"
 #include "engine/texture_cache.h"
 #include "gameobject.h"
+#include "mapgen.h"
 #include <vector>
 #include <cassert>
 #include <cmath>
@@ -18,8 +19,6 @@
 
 using engine::SDLState;
 
-const int MAP_ROWS = 14;
-const int MAP_COLS = 18;
 const int TILE_SIZE = 32;
 
 struct GameState
@@ -30,6 +29,7 @@ struct GameState
 	int playerIdx = -1;
 	engine::Camera camera;
 	bool debugMode = false;
+	Uint64 mapSeed = 0;
 
 	GameObject& getPlayer() { return characters[playerIdx]; }
 };
@@ -122,6 +122,9 @@ int main(int argc, char* argv[])
 					if (event.key.scancode == SDL_SCANCODE_1) {
 						gs.debugMode = !gs.debugMode;
 					}
+					else if (event.key.scancode == SDL_SCANCODE_2) {
+						createMap(state, gs, resources);
+					}
 					break;
 			}
 		}
@@ -163,8 +166,8 @@ int main(int argc, char* argv[])
 		if (gs.debugMode)
 		{
 			SDL_SetRenderDrawColor(state.renderer, 255, 255, 255, 255);
-			SDL_RenderDebugText(state.renderer, 5, 5, std::format("walls: {}, characters: {}",
-				gs.walls.size(), gs.characters.size()).c_str());
+			SDL_RenderDebugText(state.renderer, 5, 5, std::format("walls: {}, characters: {}, seed: {}",
+				gs.walls.size(), gs.characters.size(), gs.mapSeed).c_str());
 		}
 
 		SDL_RenderPresent(state.renderer);
@@ -338,42 +341,33 @@ void moveAndCollide(GameState& gs, GameObject& obj, float deltaTime)
 
 void createMap(const SDLState& state, GameState& gs, Resources& res)
 {
-	/*
-		0 = floor (walkable)
-		1 = wall (blocks movement)
-		2 = player start
-		3 = enemy start
-	*/
-	short map[MAP_ROWS][MAP_COLS] = {
-		1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-		1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-		1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-		1,0,0,1,1,0,0,0,0,0,0,0,0,1,1,0,0,1,
-		1,0,0,1,1,0,0,0,0,0,0,0,0,1,1,0,0,1,
-		1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-		1,0,0,0,0,0,3,0,0,0,0,2,0,0,0,0,0,1,
-		1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-		1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-		1,0,0,1,1,0,0,0,0,0,0,0,0,1,1,0,0,1,
-		1,0,0,1,1,0,0,0,0,0,0,0,0,1,1,0,0,1,
-		1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-		1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-		1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-	};
+	// also used to regenerate mid-game, so throw away the previous level first
+	gs.walls.clear();
+	gs.floorTiles.clear();
+	gs.characters.clear();
+	gs.playerIdx = -1;
 
-	for (int r = 0; r < MAP_ROWS; r++)
+	// a new layout every run. The seed is shown in debug mode -- pass it
+	// here instead to replay a level you liked (or hit a bug in)
+	GeneratedMap map = generateMap(SDL_GetPerformanceCounter());
+	gs.mapSeed = map.seed;
+
+	for (int r = 0; r < map.rows; r++)
 	{
-		for (int c = 0; c < MAP_COLS; c++)
+		for (int c = 0; c < map.cols; c++)
 		{
+			short cell = map.at(r, c);
+			if (cell == TILE_EMPTY) continue; // outside the level, nothing to draw or collide with
+
 			glm::vec2 pos(static_cast<float>(c * TILE_SIZE), static_cast<float>(r * TILE_SIZE));
 
 			// every cell gets a floor sprite underneath it, walls included,
 			// so there's no gap visible around or behind a wall tile
 			gs.floorTiles.push_back(TileSprite{ pos, res.texFloor });
 
-			switch (map[r][c])
+			switch (cell)
 			{
-				case 1: // wall
+				case TILE_WALL:
 				{
 					GameObject wall;
 					wall.type = ObjectType::Wall;
@@ -383,7 +377,7 @@ void createMap(const SDLState& state, GameState& gs, Resources& res)
 					gs.walls.push_back(wall);
 					break;
 				}
-				case 2: // player start
+				case TILE_PLAYER:
 				{
 					GameObject player;
 					player.type = ObjectType::Player;
@@ -398,7 +392,7 @@ void createMap(const SDLState& state, GameState& gs, Resources& res)
 					gs.playerIdx = static_cast<int>(gs.characters.size()) - 1;
 					break;
 				}
-				case 3: // enemy start
+				case TILE_ENEMY:
 				{
 					GameObject enemy;
 					enemy.type = ObjectType::Enemy;
@@ -412,7 +406,7 @@ void createMap(const SDLState& state, GameState& gs, Resources& res)
 					gs.characters.push_back(enemy);
 					break;
 				}
-				default: break; // 0 = floor, nothing else to place
+				default: break; // plain floor, nothing else to place
 			}
 		}
 	}
