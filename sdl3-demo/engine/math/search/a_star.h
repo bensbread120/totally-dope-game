@@ -15,7 +15,8 @@ public:
 	static glm::ivec2 toGrid(glm::vec2 worldPos);
 
 	void setBlockedCells(const std::vector<GameObject>& walls); // Rebuild the blocked grid from wall positions
-	std::vector<Direction> findPath(glm::ivec2 start, glm::ivec2 goal) const; // Directions from start to goal, empty if unreachable
+	// Directions from start to goal, empty if unreachable. avoid adds extra cells to treat as blocked for this search only
+	std::vector<Direction> findPath(glm::ivec2 start, glm::ivec2 goal, const std::set<Cell>& avoid = {}) const;
 
 private:
 	std::set<Cell> blocked; // Grid cells that cannot be walked through

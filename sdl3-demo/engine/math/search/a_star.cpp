@@ -35,7 +35,7 @@ void AStar::setBlockedCells(const std::vector<GameObject>& walls)
 	}
 }
 
-std::vector<Direction> AStar::findPath(glm::ivec2 start, glm::ivec2 goal) const
+std::vector<Direction> AStar::findPath(glm::ivec2 start, glm::ivec2 goal, const std::set<Cell>& avoid) const
 {
 	std::vector<Direction> result;
 	if (start == goal)
@@ -91,7 +91,7 @@ std::vector<Direction> AStar::findPath(glm::ivec2 start, glm::ivec2 goal) const
 		for (const glm::ivec2& offset : neighbourOffsets)
 		{
 			Cell neighbourKey = cellKey(currentCell + offset);
-			if (blocked.count(neighbourKey))
+			if (blocked.count(neighbourKey) || avoid.count(neighbourKey))
 			{
 				continue;
 			}

@@ -268,38 +268,50 @@ void updateEnemy(const SDLState& state, GameState& gs, Resources& res, GameObjec
 	EnemyData& enemy = obj.data.enemy;
 	
 	// for now will only chase player, but based on interactions can later update path target here
-	gs.pathfinder.setTarget(AStar::toGrid(gs.getPlayer().entity.position), e.id);
-	gs.pathfinder.updatePath(obj);
+	gs.pathfinder.setTarget(gs.getPlayer().entity.position, e.id);
+	gs.pathfinder.updatePath(e.id);
 
 	e.texture = res.texEnemy;
 	e.currentAnimation = res.ANUM_ENEMY_IDLE; // only one clip until it has its own walk animation
 
-	glm::ivec2 nextCell;
-	if (!gs.pathfinder.nextCell(e.id, nextCell)) { // no path, or reached its end
-		enemy.state = MovementState::Idle;
-		e.velocity = glm::vec2(0.0f);
-		return;
-	}
-	enemy.state = MovementState::Walking;
+	// follow the path cell by cell (or hold our cell while the way ahead is taken),
+	// then once the grid can't get us any closer, close in on the exact target position
+	glm::ivec2 moveCell;
+	Pathfinder::Step step = gs.pathfinder.nextStep(e.id, gs.characters, moveCell);
+	glm::vec2 targetPosition = gs.pathfinder.findPath(e.id)->targetPosition;
+	glm::vec2 goal = step == Pathfinder::Step::Arrived ? targetPosition : glm::vec2(moveCell * AStar::TILE_SIZE);
 
-	// walk towards the next cell's position, and only move on to the following
-	// step once we land on it, so each path step covers a whole tile
-	glm::vec2 toNext = glm::vec2(nextCell * AStar::TILE_SIZE) - e.position;
-	float distance = glm::length(toNext);
+	// land exactly on the goal this frame rather than overshooting it
+	glm::vec2 toGoal = goal - e.position;
+	float distance = glm::length(toGoal);
 	float stepLength = e.maxSpeed.x * deltaTime;
-	if (distance <= stepLength) {
-		// land exactly on the cell this frame rather than overshooting it
-		e.velocity = deltaTime > 0.0f ? toNext / deltaTime : glm::vec2(0.0f);
+	bool reachesGoal = distance <= stepLength;
+	glm::vec2 move = reachesGoal ? toGoal : toGoal / distance * stepLength;
+
+	if (step == Pathfinder::Step::Arrived) {
+		// off the grid now, so stop flush against anyone in the way instead of overlapping them
+		SDL_FRect body = e.worldCollider();
+		float allowed = 1.0f;
+		for (const GameObject& other : gs.characters) {
+			if (other.entity.id != e.id) {
+				allowed = std::min(allowed, engine::sweepContactTime(body, move, other.entity.worldCollider()));
+			}
+		}
+		move *= allowed;
+	}
+	else if (step == Pathfinder::Step::Walk && reachesGoal) {
+		// only move on to the following step once we land on the cell, so each path step covers a whole tile
 		gs.pathfinder.advance(e.id);
 	}
-	else {
-		e.velocity = toNext / distance * e.maxSpeed.x;
-	}
+	e.velocity = deltaTime > 0.0f ? move / deltaTime : glm::vec2(0.0f);
 
-	if (distance > 0.0f) {
-		enemy.direction = std::abs(toNext.x) > std::abs(toNext.y)
-			? (toNext.x > 0.0f ? Direction::Right : Direction::Left)
-			: (toNext.y > 0.0f ? Direction::Down : Direction::Up);
+	// face the way we're moving, or the target once we've stopped
+	enemy.state = glm::length(move) > 0.001f ? MovementState::Walking : MovementState::Idle;
+	glm::vec2 toFace = enemy.state == MovementState::Walking ? move : targetPosition - e.position;
+	if (toFace != glm::vec2(0.0f)) {
+		enemy.direction = std::abs(toFace.x) > std::abs(toFace.y)
+			? (toFace.x > 0.0f ? Direction::Right : Direction::Left)
+			: (toFace.y > 0.0f ? Direction::Down : Direction::Up);
 	}
 	e.facing = directionVector(enemy.direction);
 }
