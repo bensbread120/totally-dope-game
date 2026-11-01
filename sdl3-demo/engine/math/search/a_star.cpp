@@ -2,13 +2,29 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <map>
+#include <functional>
+#include <queue>
 
 glm::ivec2 AStar::toGrid(glm::vec2 worldPos)
 {
 	return glm::ivec2(
 		static_cast<int>(std::floor(worldPos.x / TILE_SIZE)),
 		static_cast<int>(std::floor(worldPos.y / TILE_SIZE)));
+}
+
+bool AStar::inBounds(glm::ivec2 cell) const
+{
+	return cell.x >= origin.x && cell.x < origin.x + cols && cell.y >= origin.y && cell.y < origin.y + rows;
+}
+
+int AStar::indexOf(glm::ivec2 cell) const
+{
+	return (cell.y - origin.y) * cols + (cell.x - origin.x);
+}
+
+glm::ivec2 AStar::cellAt(int index) const
+{
+	return origin + glm::ivec2(index % cols, index / cols);
 }
 
 AStar::Cell AStar::cellKey(glm::ivec2 cell) { return { cell.x, cell.y }; }
@@ -29,16 +45,36 @@ Direction AStar::directionBetween(glm::ivec2 from, glm::ivec2 to)
 void AStar::setBlockedCells(const std::vector<GameObject>& walls)
 {
 	blocked.clear();
+	cols = rows = 0;
+	if (walls.empty())
+	{
+		return;
+	}
+
+	// size the grid to the walls' bounding box
+	glm::ivec2 minCell = toGrid(walls[0].entity.position);
+	glm::ivec2 maxCell = minCell;
 	for (const GameObject& wall : walls)
 	{
-		blocked.insert(cellKey(toGrid(wall.entity.position)));
+		glm::ivec2 cell = toGrid(wall.entity.position);
+		minCell = glm::min(minCell, cell);
+		maxCell = glm::max(maxCell, cell);
+	}
+	origin = minCell;
+	cols = maxCell.x - minCell.x + 1;
+	rows = maxCell.y - minCell.y + 1;
+
+	blocked.assign(cols * rows, false);
+	for (const GameObject& wall : walls)
+	{
+		blocked[indexOf(toGrid(wall.entity.position))] = true;
 	}
 }
 
 std::vector<Direction> AStar::findPath(glm::ivec2 start, glm::ivec2 goal, const std::set<Cell>& avoid) const
 {
 	std::vector<Direction> result;
-	if (start == goal)
+	if (start == goal || !inBounds(start) || !inBounds(goal))
 	{
 		return result;
 	}
@@ -47,36 +83,39 @@ std::vector<Direction> AStar::findPath(glm::ivec2 start, glm::ivec2 goal, const 
 		{ 0, -1 },{ 0, 1 },{ -1, 0 },{ 1, 0 } // Up, Down, Left, Right
 	};
 
-	std::set<Cell> openSet{ cellKey(start) };
-	std::map<Cell, Cell> cameFrom;
-	std::map<Cell, int> gScore{ { cellKey(start), 0 } };
-	Cell goalKey = cellKey(goal);
+	// per-cell search state, indexed the same way as blocked
+	const int cellCount = cols * rows;
+	std::vector<int> gScore(cellCount, std::numeric_limits<int>::max());
+	std::vector<int> cameFrom(cellCount, -1);
+	std::vector<bool> closed(cellCount, false);
+
+	// min-heap of (f-score, cell index). A cell can be pushed again when a cheaper
+	// route to it turns up, so stale entries are skipped when popped instead of removed
+	using Entry = std::pair<int, int>;
+	std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> openSet;
+
+	const int startIndex = indexOf(start);
+	const int goalIndex = indexOf(goal);
+	gScore[startIndex] = 0;
+	openSet.push({ heuristic(start, goal), startIndex });
 
 	while (!openSet.empty())
 	{
-		// pick the open cell with the lowest f-score = g + heuristic
-		Cell current = *openSet.begin();
-		int bestF = std::numeric_limits<int>::max();
-		for (const Cell& candidate : openSet)
+		int current = openSet.top().second;
+		openSet.pop();
+		if (closed[current])
 		{
-			int f = gScore[candidate] + heuristic({ candidate.first, candidate.second }, goal);
-			if (f < bestF)
-			{
-				bestF = f;
-				current = candidate;
-			}
+			continue;
 		}
-		openSet.erase(current);
+		closed[current] = true;
 
-		if (current == goalKey)
+		if (current == goalIndex)
 		{
 			// walk parents back to the start, then reverse into start->goal order
-			std::vector<glm::ivec2> cells{ { current.first, current.second } };
-			Cell step = current;
-			while (cameFrom.count(step))
+			std::vector<glm::ivec2> cells{ cellAt(current) };
+			for (int step = cameFrom[current]; step != -1; step = cameFrom[step])
 			{
-				step = cameFrom[step];
-				cells.push_back({ step.first, step.second });
+				cells.push_back(cellAt(step));
 			}
 			std::reverse(cells.begin(), cells.end());
 
@@ -87,21 +126,27 @@ std::vector<Direction> AStar::findPath(glm::ivec2 start, glm::ivec2 goal, const 
 			return result;
 		}
 
-		glm::ivec2 currentCell{ current.first, current.second };
+		glm::ivec2 currentCell = cellAt(current);
 		for (const glm::ivec2& offset : neighbourOffsets)
 		{
-			Cell neighbourKey = cellKey(currentCell + offset);
-			if (blocked.count(neighbourKey) || avoid.count(neighbourKey))
+			glm::ivec2 neighbourCell = currentCell + offset;
+			if (!inBounds(neighbourCell))
+			{
+				continue;
+			}
+
+			int neighbour = indexOf(neighbourCell);
+			if (closed[neighbour] || blocked[neighbour] || avoid.count(cellKey(neighbourCell)))
 			{
 				continue;
 			}
 
 			int tentativeG = gScore[current] + 1;
-			if (!gScore.count(neighbourKey) || tentativeG < gScore[neighbourKey])
+			if (tentativeG < gScore[neighbour])
 			{
-				cameFrom[neighbourKey] = current;
-				gScore[neighbourKey] = tentativeG;
-				openSet.insert(neighbourKey);
+				cameFrom[neighbour] = current;
+				gScore[neighbour] = tentativeG;
+				openSet.push({ tentativeG + heuristic(neighbourCell, goal), neighbour });
 			}
 		}
 	}
