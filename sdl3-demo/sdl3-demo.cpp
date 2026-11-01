@@ -3,36 +3,13 @@
 // and this file's rendering/animation lookups are the only things that
 // need to change.
 //
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_main.h>
-#include <SDL3_image/SDL_image.h>
-#include "engine/sdl_app.h"
-#include "engine/collision.h"
-#include "engine/camera.h"
-#include "engine/texture_cache.h"
-#include "gameobject.h"
-#include <vector>
-#include <cassert>
-#include <cmath>
-#include <format>
+#include "sdl3-demo.h"
 
 using engine::SDLState;
 
 const int MAP_ROWS = 14;
 const int MAP_COLS = 18;
 const int TILE_SIZE = 32;
-
-struct GameState
-{
-	std::vector<GameObject> walls;      // collidable
-	std::vector<TileSprite> floorTiles; // decorative only, never checked for collision
-	std::vector<GameObject> characters; // player + enemies
-	int playerIdx = -1;
-	engine::Camera camera;
-	bool debugMode = false;
-
-	GameObject& getPlayer() { return characters[playerIdx]; }
-};
 
 struct Resources
 {
@@ -77,7 +54,8 @@ void update(const SDLState& state, GameState& gs, Resources& res, GameObject& ob
 void updatePlayer(const SDLState& state, GameState& gs, Resources& res, GameObject& obj, float deltaTime);
 void updateEnemy(const SDLState& state, GameState& gs, Resources& res, GameObject& obj, float deltaTime);
 void moveAndCollide(GameState& gs, GameObject& obj, float deltaTime);
-void createMap(const SDLState& state, GameState& gs, Resources& res);
+void buildWallGrid(GameState& gs);
+void initialiseGameState(const SDLState& state, GameState& gs, Resources& res);
 
 int main(int argc, char* argv[])
 {
@@ -96,7 +74,7 @@ int main(int argc, char* argv[])
 
 	GameState gs;
 	gs.camera.viewport = SDL_FRect{ 0, 0, static_cast<float>(state.logW), static_cast<float>(state.logH) };
-	createMap(state, gs, resources);
+	initialiseGameState(state, gs, resources);
 
 	uint64_t previousTime = SDL_GetTicks();
 	bool running = true;
@@ -140,8 +118,20 @@ int main(int argc, char* argv[])
 		SDL_SetRenderDrawColor(state.renderer, 20, 20, 25, 255);
 		SDL_RenderClear(state.renderer);
 
+		// only draw what the camera can see; big levels have thousands of tiles off-screen
+		const SDL_FRect& view = gs.camera.viewport;
+		auto onScreen = [&view](glm::vec2 pos) {
+			return pos.x + TILE_SIZE > view.x && pos.x < view.x + view.w
+				&& pos.y + TILE_SIZE > view.y && pos.y < view.y + view.h;
+		};
+
 		for (const TileSprite& tile : gs.floorTiles)
 		{
+			if (!onScreen(tile.position))
+			{
+				continue;
+			}
+
 			SDL_FRect dst{
 				tile.position.x - gs.camera.viewport.x,
 				tile.position.y - gs.camera.viewport.y,
@@ -152,7 +142,10 @@ int main(int argc, char* argv[])
 
 		for (GameObject& wall : gs.walls)
 		{
-			drawObject(state, gs, wall, TILE_SIZE, TILE_SIZE);
+			if (onScreen(wall.entity.position))
+			{
+				drawObject(state, gs, wall, TILE_SIZE, TILE_SIZE);
+			}
 		}
 
 		for (GameObject& character : gs.characters)
@@ -289,35 +282,54 @@ void updateEnemy(const SDLState& state, GameState& gs, Resources& res, GameObjec
 {
 	engine::Entity& e = obj.entity;
 	EnemyData& enemy = obj.data.enemy;
+	
+	// for now will only chase player, but based on interactions can later update path target here
+	gs.pathfinder.setTarget(gs.getPlayer().entity.position, e.id);
+	gs.pathfinder.updatePath(e.id);
 
-	if (enemy.wanderTimer.step(deltaTime))
-	{
-		// most rolls pick a new walking direction, one in five just pauses
-		int roll = SDL_rand(5);
-		if (roll == 0)
-		{
-			enemy.state = MovementState::Idle;
-		}
-		else
-		{
-			enemy.state = MovementState::Walking;
-			enemy.direction = static_cast<Direction>(SDL_rand(4));
-		}
-		// re-armed with a new random length each time, which is why this
-		// constructs a fresh Timer instead of calling reset() -- reset()
-		// keeps the existing length, and the whole point here is variety
-		enemy.wanderTimer = Timer(1.0f + SDL_randf() * 1.5f);
-	}
-
-	// a wall collision below will zero this out again via resolveAxisAligned,
-	// so a blocked enemy just sits at the wall until the timer next fires --
-	// good enough for a placeholder, worth revisiting once you want an enemy
-	// that turns around immediately instead of waiting
-	glm::vec2 dir = enemy.state == MovementState::Walking ? directionVector(enemy.direction) : glm::vec2(0.0f);
-	e.velocity = dir * e.maxSpeed;
-	e.facing = directionVector(enemy.direction);
 	e.texture = res.texEnemy;
 	e.currentAnimation = res.ANUM_ENEMY_IDLE; // only one clip until it has its own walk animation
+
+	// follow the path cell by cell (or hold our cell while the way ahead is taken),
+	// then once the grid can't get us any closer, close in on the exact target position
+	glm::ivec2 moveCell;
+	Pathfinder::Step step = gs.pathfinder.nextStep(e.id, gs.characters, moveCell);
+	glm::vec2 targetPosition = gs.pathfinder.findPath(e.id)->targetPosition;
+	glm::vec2 goal = step == Pathfinder::Step::Arrived ? targetPosition : glm::vec2(moveCell * AStar::TILE_SIZE);
+
+	// land exactly on the goal this frame rather than overshooting it
+	glm::vec2 toGoal = goal - e.position;
+	float distance = glm::length(toGoal);
+	float stepLength = e.maxSpeed.x * deltaTime;
+	bool reachesGoal = distance <= stepLength;
+	glm::vec2 move = reachesGoal ? toGoal : toGoal / distance * stepLength;
+
+	if (step == Pathfinder::Step::Arrived) {
+		// off the grid now, so stop flush against anyone in the way instead of overlapping them
+		SDL_FRect body = e.worldCollider();
+		float allowed = 1.0f;
+		for (const GameObject& other : gs.characters) {
+			if (other.entity.id != e.id) {
+				allowed = std::min(allowed, engine::sweepContactTime(body, move, other.entity.worldCollider()));
+			}
+		}
+		move *= allowed;
+	}
+	else if (step == Pathfinder::Step::Walk && reachesGoal) {
+		// only move on to the following step once we land on the cell, so each path step covers a whole tile
+		gs.pathfinder.advance(e.id);
+	}
+	e.velocity = deltaTime > 0.0f ? move / deltaTime : glm::vec2(0.0f);
+
+	// face the way we're moving, or the target once we've stopped
+	enemy.state = glm::length(move) > 0.001f ? MovementState::Walking : MovementState::Idle;
+	glm::vec2 toFace = enemy.state == MovementState::Walking ? move : targetPosition - e.position;
+	if (toFace != glm::vec2(0.0f)) {
+		enemy.direction = std::abs(toFace.x) > std::abs(toFace.y)
+			? (toFace.x > 0.0f ? Direction::Right : Direction::Left)
+			: (toFace.y > 0.0f ? Direction::Down : Direction::Up);
+	}
+	e.facing = directionVector(enemy.direction);
 }
 
 void moveAndCollide(GameState& gs, GameObject& obj, float deltaTime)
@@ -325,19 +337,68 @@ void moveAndCollide(GameState& gs, GameObject& obj, float deltaTime)
 	obj.entity.position += obj.entity.velocity * deltaTime;
 
 	// characters don't yet collide with each other, only with walls --
-	// add a characters-vs-characters pass once you want combat/blocking
-	for (GameObject& wall : gs.walls)
+	// add a characters-vs-characters pass once you want combat/blocking.
+	// walls sit one per tile, so only the cells under our collider can hold one we touch
+	SDL_FRect body = obj.entity.worldCollider();
+	int firstCol = static_cast<int>(std::floor(body.x / TILE_SIZE)) - gs.wallGridOrigin.x;
+	int lastCol = static_cast<int>(std::floor((body.x + body.w) / TILE_SIZE)) - gs.wallGridOrigin.x;
+	int firstRow = static_cast<int>(std::floor(body.y / TILE_SIZE)) - gs.wallGridOrigin.y;
+	int lastRow = static_cast<int>(std::floor((body.y + body.h) / TILE_SIZE)) - gs.wallGridOrigin.y;
+	for (int r = std::max(firstRow, 0); r <= std::min(lastRow, gs.wallGridRows - 1); r++)
 	{
-		SDL_FRect overlap;
-		if (engine::checkOverlap(obj.entity, wall.entity, overlap))
+		for (int c = std::max(firstCol, 0); c <= std::min(lastCol, gs.wallGridCols - 1); c++)
 		{
-			engine::resolveAxisAligned(obj.entity, overlap);
+			int wallIdx = gs.wallGrid[r * gs.wallGridCols + c];
+			if (wallIdx == -1)
+			{
+				continue;
+			}
+
+			SDL_FRect overlap;
+			if (engine::checkOverlap(obj.entity, gs.walls[wallIdx].entity, overlap))
+			{
+				engine::resolveAxisAligned(obj.entity, overlap);
+			}
 		}
 	}
 }
 
-void createMap(const SDLState& state, GameState& gs, Resources& res)
+void buildWallGrid(GameState& gs)
 {
+	gs.wallGrid.clear();
+	gs.wallGridCols = gs.wallGridRows = 0;
+	if (gs.walls.empty())
+	{
+		return;
+	}
+
+	// size the grid to the walls' bounding box
+	auto cellOf = [](const GameObject& wall) {
+		return glm::ivec2(glm::floor(wall.entity.position / static_cast<float>(TILE_SIZE)));
+	};
+	glm::ivec2 minCell = cellOf(gs.walls[0]);
+	glm::ivec2 maxCell = minCell;
+	for (const GameObject& wall : gs.walls)
+	{
+		minCell = glm::min(minCell, cellOf(wall));
+		maxCell = glm::max(maxCell, cellOf(wall));
+	}
+	gs.wallGridOrigin = minCell;
+	gs.wallGridCols = maxCell.x - minCell.x + 1;
+	gs.wallGridRows = maxCell.y - minCell.y + 1;
+
+	gs.wallGrid.assign(gs.wallGridCols * gs.wallGridRows, -1);
+	for (size_t i = 0; i < gs.walls.size(); i++)
+	{
+		glm::ivec2 cell = cellOf(gs.walls[i]) - minCell;
+		gs.wallGrid[cell.y * gs.wallGridCols + cell.x] = static_cast<int>(i);
+	}
+}
+
+void initialiseGameState(const SDLState& state, GameState& gs, Resources& res)
+{
+	gs.pathfinder = Pathfinder{};
+	
 	/*
 		0 = floor (walkable)
 		1 = wall (blocks movement)
@@ -346,7 +407,7 @@ void createMap(const SDLState& state, GameState& gs, Resources& res)
 	*/
 	short map[MAP_ROWS][MAP_COLS] = {
 		1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-		1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+		1,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
 		1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
 		1,0,0,1,1,0,0,0,0,0,0,0,0,1,1,0,0,1,
 		1,0,0,1,1,0,0,0,0,0,0,0,0,1,1,0,0,1,
@@ -354,7 +415,7 @@ void createMap(const SDLState& state, GameState& gs, Resources& res)
 		1,0,0,0,0,0,3,0,0,0,0,2,0,0,0,0,0,1,
 		1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
 		1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-		1,0,0,1,1,0,0,0,0,0,0,0,0,1,1,0,0,1,
+		1,0,0,1,1,0,0,0,0,3,0,0,0,1,1,0,0,1,
 		1,0,0,1,1,0,0,0,0,0,0,0,0,1,1,0,0,1,
 		1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
 		1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
@@ -410,12 +471,16 @@ void createMap(const SDLState& state, GameState& gs, Resources& res)
 					enemy.entity.maxSpeed = glm::vec2(60.0f, 60.0f);
 					enemy.entity.collider = SDL_FRect{ 8, 8, 16, 16 };
 					gs.characters.push_back(enemy);
+					gs.pathfinder.initialisePath(enemy);
 					break;
 				}
 				default: break; // 0 = floor, nothing else to place
 			}
 		}
 	}
+
+	buildWallGrid(gs);
+	gs.pathfinder.setBlockedCells(gs.walls);
 
 	assert(gs.playerIdx != -1 && "Player not created in map");
 }
