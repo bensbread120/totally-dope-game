@@ -103,8 +103,6 @@ int main(int argc, char* argv[])
 			}
 		}
 
-		gs.pathfinder.updatePaths(gs);
-
 		// movement here is continuous (state.keys polled every frame in
 		// updatePlayer) rather than the platformer's edge-triggered jump,
 		// so there's no handleKeyInput -- that pattern comes back once you
@@ -269,25 +267,41 @@ void updateEnemy(const SDLState& state, GameState& gs, Resources& res, GameObjec
 	engine::Entity& e = obj.entity;
 	EnemyData& enemy = obj.data.enemy;
 	
-	enemy.state = MovementState::Walking;
-	Pathfinder::Path* path = gs.pathfinder.findPath(e.id);
-	if (path == nullptr || path->pathIndex >= static_cast<int>(path->path.size())) { // no path, or reached its end
-		enemy.state = MovementState::Idle;
-		return;
-	}
+	// for now will only chase player, but based on interactions can later update path target here
+	gs.pathfinder.setTarget(AStar::toGrid(gs.getPlayer().entity.position), e.id);
+	gs.pathfinder.updatePath(obj);
 
-	enemy.direction = path->path[path->pathIndex];
-	path->pathIndex += 1;
-
-	// a wall collision below will zero this out again via resolveAxisAligned,
-	// so a blocked enemy just sits at the wall until the timer next fires --
-	// good enough for a placeholder, worth revisiting once you want an enemy
-	// that turns around immediately instead of waiting
-	glm::vec2 dir = enemy.state == MovementState::Walking ? directionVector(enemy.direction) : glm::vec2(0.0f);
-	e.velocity = dir * e.maxSpeed;
-	e.facing = directionVector(enemy.direction);
 	e.texture = res.texEnemy;
 	e.currentAnimation = res.ANUM_ENEMY_IDLE; // only one clip until it has its own walk animation
+
+	glm::ivec2 nextCell;
+	if (!gs.pathfinder.nextCell(e.id, nextCell)) { // no path, or reached its end
+		enemy.state = MovementState::Idle;
+		e.velocity = glm::vec2(0.0f);
+		return;
+	}
+	enemy.state = MovementState::Walking;
+
+	// walk towards the next cell's position, and only move on to the following
+	// step once we land on it, so each path step covers a whole tile
+	glm::vec2 toNext = glm::vec2(nextCell * AStar::TILE_SIZE) - e.position;
+	float distance = glm::length(toNext);
+	float stepLength = e.maxSpeed.x * deltaTime;
+	if (distance <= stepLength) {
+		// land exactly on the cell this frame rather than overshooting it
+		e.velocity = deltaTime > 0.0f ? toNext / deltaTime : glm::vec2(0.0f);
+		gs.pathfinder.advance(e.id);
+	}
+	else {
+		e.velocity = toNext / distance * e.maxSpeed.x;
+	}
+
+	if (distance > 0.0f) {
+		enemy.direction = std::abs(toNext.x) > std::abs(toNext.y)
+			? (toNext.x > 0.0f ? Direction::Right : Direction::Left)
+			: (toNext.y > 0.0f ? Direction::Down : Direction::Up);
+	}
+	e.facing = directionVector(enemy.direction);
 }
 
 void moveAndCollide(GameState& gs, GameObject& obj, float deltaTime)
@@ -367,7 +381,6 @@ void initialiseGameState(const SDLState& state, GameState& gs, Resources& res)
 					player.entity.maxSpeed = glm::vec2(120.0f, 120.0f);
 					player.entity.collider = SDL_FRect{ 8, 8, 16, 16 };
 					gs.characters.push_back(player);
-					gs.pathfinder.targetLocation = player.entity.position;
 					gs.playerIdx = static_cast<int>(gs.characters.size()) - 1;
 					break;
 				}
@@ -390,6 +403,8 @@ void initialiseGameState(const SDLState& state, GameState& gs, Resources& res)
 			}
 		}
 	}
+
+	gs.pathfinder.setBlockedCells(gs.walls);
 
 	assert(gs.playerIdx != -1 && "Player not created in map");
 }
