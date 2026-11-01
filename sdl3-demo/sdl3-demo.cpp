@@ -104,7 +104,7 @@ int main(int argc, char* argv[])
 			}
 		}
 
-		updatePaths(gs);
+		gs.pathfinder.updatePaths(gs);
 
 		// movement here is continuous (state.keys polled every frame in
 		// updatePlayer) rather than the platformer's edge-triggered jump,
@@ -271,7 +271,7 @@ void updateEnemy(const SDLState& state, GameState& gs, Resources& res, GameObjec
 	EnemyData& enemy = obj.data.enemy;
 	
 	enemy.state = MovementState::Walking;
-	Path* path = findPath(gs.pathfinder, e.id);
+	Pathfinder::Path* path = gs.pathfinder.findPath(e.id);
 	if (path == nullptr || path->pathIndex >= static_cast<int>(path->path.size())) { // no path, or reached its end
 		enemy.state = MovementState::Idle;
 		return;
@@ -374,7 +374,7 @@ void initialiseGameState(const SDLState& state, GameState& gs, Resources& res)
 					enemy.entity.maxSpeed = glm::vec2(60.0f, 60.0f);
 					enemy.entity.collider = SDL_FRect{ 8, 8, 16, 16 };
 					gs.characters.push_back(enemy);
-					initialisePath(gs.pathfinder, enemy);
+					gs.pathfinder.initialisePath(enemy);
 					break;
 				}
 				default: break; // plain floor, nothing else to place
