@@ -39,7 +39,7 @@ public:
 	void advance(int id); // Entity reached its next cell, move on to the following step
 
 private:
-	AStar search; // Search algorithm used to build paths
+	AStar search;
 
 	bool peekNextCell(const Path& path, glm::ivec2& cell) const;
 	std::set<AStar::Cell> reservedCells(int ignoreId) const; // Cells held or being walked into by other pathing entities

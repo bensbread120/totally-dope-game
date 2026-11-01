@@ -54,6 +54,7 @@ void update(const SDLState& state, GameState& gs, Resources& res, GameObject& ob
 void updatePlayer(const SDLState& state, GameState& gs, Resources& res, GameObject& obj, float deltaTime);
 void updateEnemy(const SDLState& state, GameState& gs, Resources& res, GameObject& obj, float deltaTime);
 void moveAndCollide(GameState& gs, GameObject& obj, float deltaTime);
+void buildWallGrid(GameState& gs);
 void initialiseGameState(const SDLState& state, GameState& gs, Resources& res);
 
 int main(int argc, char* argv[])
@@ -117,8 +118,20 @@ int main(int argc, char* argv[])
 		SDL_SetRenderDrawColor(state.renderer, 20, 20, 25, 255);
 		SDL_RenderClear(state.renderer);
 
+		// only draw what the camera can see; big levels have thousands of tiles off-screen
+		const SDL_FRect& view = gs.camera.viewport;
+		auto onScreen = [&view](glm::vec2 pos) {
+			return pos.x + TILE_SIZE > view.x && pos.x < view.x + view.w
+				&& pos.y + TILE_SIZE > view.y && pos.y < view.y + view.h;
+		};
+
 		for (const TileSprite& tile : gs.floorTiles)
 		{
+			if (!onScreen(tile.position))
+			{
+				continue;
+			}
+
 			SDL_FRect dst{
 				tile.position.x - gs.camera.viewport.x,
 				tile.position.y - gs.camera.viewport.y,
@@ -129,7 +142,10 @@ int main(int argc, char* argv[])
 
 		for (GameObject& wall : gs.walls)
 		{
-			drawObject(state, gs, wall, TILE_SIZE, TILE_SIZE);
+			if (onScreen(wall.entity.position))
+			{
+				drawObject(state, gs, wall, TILE_SIZE, TILE_SIZE);
+			}
 		}
 
 		for (GameObject& character : gs.characters)
@@ -321,14 +337,61 @@ void moveAndCollide(GameState& gs, GameObject& obj, float deltaTime)
 	obj.entity.position += obj.entity.velocity * deltaTime;
 
 	// characters don't yet collide with each other, only with walls --
-	// add a characters-vs-characters pass once you want combat/blocking
-	for (GameObject& wall : gs.walls)
+	// add a characters-vs-characters pass once you want combat/blocking.
+	// walls sit one per tile, so only the cells under our collider can hold one we touch
+	SDL_FRect body = obj.entity.worldCollider();
+	int firstCol = static_cast<int>(std::floor(body.x / TILE_SIZE)) - gs.wallGridOrigin.x;
+	int lastCol = static_cast<int>(std::floor((body.x + body.w) / TILE_SIZE)) - gs.wallGridOrigin.x;
+	int firstRow = static_cast<int>(std::floor(body.y / TILE_SIZE)) - gs.wallGridOrigin.y;
+	int lastRow = static_cast<int>(std::floor((body.y + body.h) / TILE_SIZE)) - gs.wallGridOrigin.y;
+	for (int r = std::max(firstRow, 0); r <= std::min(lastRow, gs.wallGridRows - 1); r++)
 	{
-		SDL_FRect overlap;
-		if (engine::checkOverlap(obj.entity, wall.entity, overlap))
+		for (int c = std::max(firstCol, 0); c <= std::min(lastCol, gs.wallGridCols - 1); c++)
 		{
-			engine::resolveAxisAligned(obj.entity, overlap);
+			int wallIdx = gs.wallGrid[r * gs.wallGridCols + c];
+			if (wallIdx == -1)
+			{
+				continue;
+			}
+
+			SDL_FRect overlap;
+			if (engine::checkOverlap(obj.entity, gs.walls[wallIdx].entity, overlap))
+			{
+				engine::resolveAxisAligned(obj.entity, overlap);
+			}
 		}
+	}
+}
+
+void buildWallGrid(GameState& gs)
+{
+	gs.wallGrid.clear();
+	gs.wallGridCols = gs.wallGridRows = 0;
+	if (gs.walls.empty())
+	{
+		return;
+	}
+
+	// size the grid to the walls' bounding box
+	auto cellOf = [](const GameObject& wall) {
+		return glm::ivec2(glm::floor(wall.entity.position / static_cast<float>(TILE_SIZE)));
+	};
+	glm::ivec2 minCell = cellOf(gs.walls[0]);
+	glm::ivec2 maxCell = minCell;
+	for (const GameObject& wall : gs.walls)
+	{
+		minCell = glm::min(minCell, cellOf(wall));
+		maxCell = glm::max(maxCell, cellOf(wall));
+	}
+	gs.wallGridOrigin = minCell;
+	gs.wallGridCols = maxCell.x - minCell.x + 1;
+	gs.wallGridRows = maxCell.y - minCell.y + 1;
+
+	gs.wallGrid.assign(gs.wallGridCols * gs.wallGridRows, -1);
+	for (size_t i = 0; i < gs.walls.size(); i++)
+	{
+		glm::ivec2 cell = cellOf(gs.walls[i]) - minCell;
+		gs.wallGrid[cell.y * gs.wallGridCols + cell.x] = static_cast<int>(i);
 	}
 }
 
@@ -416,6 +479,7 @@ void initialiseGameState(const SDLState& state, GameState& gs, Resources& res)
 		}
 	}
 
+	buildWallGrid(gs);
 	gs.pathfinder.setBlockedCells(gs.walls);
 
 	assert(gs.playerIdx != -1 && "Player not created in map");
