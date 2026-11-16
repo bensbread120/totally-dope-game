@@ -5,7 +5,7 @@
 
 A top-down adventure prototype written in C++20 with [SDL3](https://libsdl.org), [SDL3_image](https://github.com/libsdl-org/SDL_image) and [glm](https://github.com/g-truc/glm).
 
-**Controls:** arrow keys to move, `1` to toggle debug view (colliders and object counts).
+**Controls:** arrow keys to move, `1` to toggle debug view (colliders, object counts and the level seed), `2` to generate a new level.
 
 ## Prerequisites
 
