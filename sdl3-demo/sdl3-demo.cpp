@@ -99,7 +99,7 @@ int main(int argc, char* argv[])
 						gs.debugMode = !gs.debugMode;
 					}
 					else if (event.key.scancode == SDL_SCANCODE_2) {
-						createMap(state, gs, resources);
+						initialiseGameState(state, gs, resources);
 					}
 					break;
 			}

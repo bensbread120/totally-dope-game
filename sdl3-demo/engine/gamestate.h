@@ -18,6 +18,7 @@ struct GameState
 	int playerIdx = -1;
 	engine::Camera camera;
 	bool debugMode = false;
+	Uint64 mapSeed = 0;
 
 	GameObject& getPlayer() { return characters[playerIdx]; }
 };

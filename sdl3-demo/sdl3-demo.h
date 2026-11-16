@@ -19,3 +19,4 @@
 #include "engine/pathfinder.h"
 #include "engine/gamestate.h"
 #include "gameobject.h"
+#include "mapgen.h"
