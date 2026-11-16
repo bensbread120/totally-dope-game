@@ -1,12 +1,22 @@
 #pragma once
 #include "engine/entity.h"
+#include <cstdint>
 
-// Four-directional facing, kept orthogonal to whether the entity is
-// currently moving. Deliberately not combined into one enum (e.g.
-// WalkingUp/IdleUp/...) -- that would double in size the moment you add a
-// third state like Attacking, whereas MovementState x Direction stays a
-// simple pair.
-enum class Direction { Up, Down, Left, Right };
+// Octal movement allows moving to diagonal tiles. Ordinal directions are
+// purposefully a union of cardinal directions so movement checks on cardinal
+// directions alone are possible, e.g. player movement == up will return true
+// if player is moving UpRight or UpLeft.
+enum class Direction : uint8_t {
+	None = 0,
+	Up = 1 << 0,
+	Down = 1 << 1,
+	Left = 1 << 2,
+	Right = 1 << 3,
+	UpLeft = Up | Left,
+	UpRight = Up | Right,
+	DownLeft = Down | Left,
+	DownRight = Down | Right,
+};
 enum class MovementState { Idle, Walking };
 
 inline glm::vec2 directionVector(Direction dir)
