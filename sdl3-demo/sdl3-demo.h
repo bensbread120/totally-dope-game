@@ -4,6 +4,8 @@
 #pragma once
 
 #include <vector>
+#include <string>
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <format>

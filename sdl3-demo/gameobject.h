@@ -35,13 +35,20 @@ struct PlayerData
 {
 	MovementState state = MovementState::Idle;
 	Direction direction = Direction::Down;
+	bool attacking = false; // locks movement and facing until the attack animation finishes
 };
+
+// Chase -> (player in range, cooldown over) -> Windup -> Attacking -> Chase
+enum class EnemyAction { Chase, Windup, Attacking };
 
 struct EnemyData
 {
 	MovementState state = MovementState::Idle;
 	Direction direction = Direction::Down;
 	Timer wanderTimer;
+	EnemyAction action = EnemyAction::Chase;
+	float windupLeft = 0.0f;   // seconds of telegraph before the swing starts
+	float cooldownLeft = 0.0f; // seconds until it may start another attack
 	EnemyData() : wanderTimer(1.5f) {}
 };
 

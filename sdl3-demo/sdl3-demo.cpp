@@ -1,7 +1,5 @@
-// main.cpp : top-down adventure game prototype. Reuses the platformer's
-// idle/run/enemy sprites as placeholders -- swap in real directional art
-// and this file's rendering/animation lookups are the only things that
-// need to change.
+// main.cpp : top-down adventure game prototype. Paul (player) and skeleton
+// (enemy) each have idle / walk / attack clips in four directions.
 //
 #include "sdl3-demo.h"
 
@@ -9,45 +7,98 @@ using engine::SDLState;
 
 const int TILE_SIZE = 32;
 
+// skeletons stop to swing once they're about a tile from the player, telegraph
+// for a moment so the player can react, then can't swing again until the cooldown ends
+const float ENEMY_ATTACK_RANGE = 30.0f;
+const float ENEMY_ATTACK_WINDUP = 0.35f;
+const float ENEMY_ATTACK_COOLDOWN = 1.0f;
+
+// Animation slots are laid out [clip][direction]: ANUM_<clip> + dirIndex(direction).
+inline int dirIndex(Direction dir)
+{
+	switch (dir)
+	{
+		case Direction::Up:    return 1;
+		case Direction::Left:  return 2;
+		case Direction::Right: return 3;
+		default:               return 0; // Down
+	}
+}
+
 struct Resources
 {
-	const int ANUM_PLAYER_IDLE = 0;
-	const int ANUM_PLAYER_IDLE_DOWN = 1;
-	const int ANUM_PLAYER_WALK = 2;
+	static constexpr int ANUM_IDLE = 0;
+	static constexpr int ANUM_WALK = 4;
+	static constexpr int ANUM_ATTACK = 8;
+	static constexpr int ANUM_COUNT = 12;
 
+	// each animation has its own sprite strip; textures[i] goes with animations[i]
 	std::vector<Animation> playerAnimations;
-
-	const int ANUM_ENEMY_IDLE = 0;
+	std::vector<SDL_Texture*> playerTextures;
 	std::vector<Animation> enemyAnimations;
+	std::vector<SDL_Texture*> enemyTextures;
 
 	engine::TextureCache cache;
-	SDL_Texture* texIdle, *texPaulDown, *texRunning, *texEnemy, *texWall, *texFloor;
+	SDL_Texture* texWall, *texFloor;
 
 	void load(SDLState& state)
 	{
-		playerAnimations.resize(3);
-		playerAnimations[ANUM_PLAYER_IDLE] = Animation(8, 1.6f);
-		playerAnimations[ANUM_PLAYER_IDLE_DOWN] = Animation(4, 1.0f);
-		playerAnimations[ANUM_PLAYER_WALK] = Animation(4, 0.5f);
+		auto tex = [&](const std::string& file) { return cache.load(state.renderer, "assets/" + file); };
+		const char* dirs[] = { "down", "up", "left", "right" };
 
-		enemyAnimations.resize(1);
-		enemyAnimations[ANUM_ENEMY_IDLE] = Animation(8, 1.0f);
+		// Strips are 32x32 frames, except attacks which are 48x48 so the swing
+		// fits; drawObject centres oversized frames on the character's tile.
+		playerAnimations.resize(ANUM_COUNT);
+		playerTextures.resize(ANUM_COUNT);
+		for (int d = 0; d < 4; d++)
+		{
+			playerAnimations[ANUM_IDLE + d] = Animation(4, 1.0f);
+			playerAnimations[ANUM_WALK + d] = Animation(4, 0.5f);
+			playerAnimations[ANUM_ATTACK + d] = Animation(4, 0.32f, /*loop*/false);
+			// idle down is the hand-drawn original, hence the odd name out
+			playerTextures[ANUM_IDLE + d] = tex(d == 0 ? std::string("paul_down.png") : std::format("paul_idle_{}.png", dirs[d]));
+			playerTextures[ANUM_WALK + d] = tex(std::format("paul_walk_{}.png", dirs[d]));
+			playerTextures[ANUM_ATTACK + d] = tex(std::format("paul_attack_{}.png", dirs[d]));
+		}
 
+		// The skeleton sheet has walk strips for up/down and run strips for
+		// left/right, but idles only for left/right -- so idling up/down holds
+		// the first walk frame.
+		enemyAnimations.resize(ANUM_COUNT);
+		enemyTextures.resize(ANUM_COUNT);
+		for (int d = 0; d < 4; d++)
+		{
+			bool vertical = d < 2;
+			enemyAnimations[ANUM_IDLE + d] = vertical ? Animation(1, 1.0f) : Animation(5, 0.5f);
+			enemyAnimations[ANUM_WALK + d] = Animation(5, 0.5f);
+			enemyAnimations[ANUM_ATTACK + d] = Animation(4, 0.45f, /*loop*/false);
+			enemyTextures[ANUM_IDLE + d] = tex(std::format("skeleton_{}_{}.png", vertical ? "walk" : "idle", dirs[d]));
+			enemyTextures[ANUM_WALK + d] = tex(std::format("skeleton_{}_{}.png", vertical ? "walk" : "run", dirs[d]));
+			enemyTextures[ANUM_ATTACK + d] = tex(std::format("skeleton_attack_{}.png", dirs[d]));
+		}
 
-		// same source images as the platformer -- only the wall/floor
-		// textures are new, and even those are borrowed from its tileset
-		texIdle    = cache.load(state.renderer, "assets/idle.png");
-		texPaulDown = cache.load(state.renderer, "assets/paul_down.png");
-		texRunning = cache.load(state.renderer, "assets/run.png");
-		texEnemy   = cache.load(state.renderer, "assets/enemy.png");
-		texWall    = cache.load(state.renderer, "assets/panel.png");
-		texFloor   = cache.load(state.renderer, "assets/brick.png");
+		texWall    = tex("panel.png");
+		texFloor   = tex("brick.png");
 	}
 
 	void unload() { cache.unload(); }
 };
 
+// Switch to the clip for `anim` facing `dir`. `restart` rewinds it, which a
+// one-shot clip like an attack needs every time it's played.
+void playAnimation(engine::Entity& e, const std::vector<SDL_Texture*>& textures, int anim, Direction dir, bool restart = false)
+{
+	int idx = anim + dirIndex(dir);
+	if (restart)
+	{
+		e.animations[idx].reset();
+	}
+	e.currentAnimation = idx;
+	e.texture = textures[idx];
+}
+
 void drawObject(const SDLState& state, GameState& gs, GameObject& obj, float width, float height);
+void startPlayerAttack(GameObject& obj, Resources& res);
 void update(const SDLState& state, GameState& gs, Resources& res, GameObject& obj, float deltaTime);
 void updatePlayer(const SDLState& state, GameState& gs, Resources& res, GameObject& obj, float deltaTime);
 void updateEnemy(const SDLState& state, GameState& gs, Resources& res, GameObject& obj, float deltaTime);
@@ -94,6 +145,13 @@ int main(int argc, char* argv[])
 					state.width = event.window.data1;
 					state.height = event.window.data2;
 					break;
+				case SDL_EVENT_KEY_DOWN:
+					// attacks are discrete actions, so they fire on the press
+					// (not every frame the key is held, and not on key repeat)
+					if (event.key.scancode == SDL_SCANCODE_SPACE && !event.key.repeat) {
+						startPlayerAttack(gs.getPlayer(), resources);
+					}
+					break;
 				case SDL_EVENT_KEY_UP:
 					if (event.key.scancode == SDL_SCANCODE_1) {
 						gs.debugMode = !gs.debugMode;
@@ -105,10 +163,8 @@ int main(int argc, char* argv[])
 			}
 		}
 
-		// movement here is continuous (state.keys polled every frame in
-		// updatePlayer) rather than the platformer's edge-triggered jump,
-		// so there's no handleKeyInput -- that pattern comes back once you
-		// add a discrete action like an attack.
+		// movement is continuous (state.keys polled every frame in
+		// updatePlayer); only the attack is edge-triggered, in the event loop above
 		for (GameObject& character : gs.characters)
 		{
 			update(state, gs, resources, character, deltaTime);
@@ -149,9 +205,20 @@ int main(int argc, char* argv[])
 			}
 		}
 
+		// back to front, so whoever is lower on screen overlaps the ones above
+		// (attack frames are bigger than a tile and spill onto neighbours)
+		std::vector<GameObject*> drawOrder;
+		drawOrder.reserve(gs.characters.size());
 		for (GameObject& character : gs.characters)
 		{
-			drawObject(state, gs, character, TILE_SIZE, TILE_SIZE);
+			drawOrder.push_back(&character);
+		}
+		std::sort(drawOrder.begin(), drawOrder.end(), [](const GameObject* a, const GameObject* b) {
+			return a->entity.position.y < b->entity.position.y;
+		});
+		for (GameObject* character : drawOrder)
+		{
+			drawObject(state, gs, *character, TILE_SIZE, TILE_SIZE);
 		}
 
 		if (gs.debugMode)
@@ -173,21 +240,29 @@ int main(int argc, char* argv[])
 void drawObject(const SDLState& state, GameState& gs, GameObject& obj, float width, float height)
 {
 	engine::Entity& e = obj.entity;
-	float srcX = e.currentAnimation != -1 ? e.animations[e.currentAnimation].currentFrame() * width : 0.0f;
-	SDL_FRect src{ srcX, 0, width, height };
+
+	// width/height is the object's footprint (one tile). An animated object's
+	// frame size comes from its strip instead: frames are square, so the strip's
+	// height is the frame size. That way a strip with bigger frames (the 48x48
+	// attacks) is drawn centred on the footprint, the body stays exactly where
+	// the 32x32 clips put it, and an animation may use only the first few
+	// frames of a strip (skeleton idle up/down holds walk frame 0).
+	float frameW = width, frameH = height, srcX = 0.0f;
+	if (e.currentAnimation != -1 && e.texture) // texture is null if its file failed to load
+	{
+		frameW = frameH = static_cast<float>(e.texture->h);
+		srcX = e.animations[e.currentAnimation].currentFrame() * frameW;
+	}
+	SDL_FRect src{ srcX, 0, frameW, frameH };
 
 	SDL_FRect dst{
-		e.position.x - gs.camera.viewport.x,
-		e.position.y - gs.camera.viewport.y,
-		width, height
+		e.position.x - gs.camera.viewport.x - (frameW - width) / 2,
+		e.position.y - gs.camera.viewport.y - (frameH - height) / 2,
+		frameW, frameH
 	};
 
-	// Only one facing sprite exists so far, so this is a placeholder: flip
-	// horizontally for Left, leave Right/Up/Down as the default pose. Once
-	// you have real per-direction art, key this off e.facing.x/y properly
-	// (or just pick the right texture per direction, no flip needed).
-	SDL_FlipMode flipMode = (e.facing.x < 0) ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE;
-	SDL_RenderTextureRotated(state.renderer, e.texture, &src, &dst, 0, nullptr, flipMode);
+	// every direction has its own strip, so no flipping
+	SDL_RenderTexture(state.renderer, e.texture, &src, &dst);
 
 	if (gs.debugMode)
 	{
@@ -221,6 +296,17 @@ void updatePlayer(const SDLState& state, GameState& gs, Resources& res, GameObje
 	engine::Entity& e = obj.entity;
 	PlayerData& player = obj.data.player;
 
+	// planted for the whole swing: no moving or turning until it finishes
+	if (player.attacking)
+	{
+		e.velocity = glm::vec2(0.0f);
+		if (!e.animations[e.currentAnimation].isDone())
+		{
+			return;
+		}
+		player.attacking = false;
+	}
+
 	glm::vec2 input{ 0.0f };
 	if (state.keys[SDL_SCANCODE_LEFT])  input.x -= 1.0f;
 	if (state.keys[SDL_SCANCODE_RIGHT]) input.x += 1.0f;
@@ -251,45 +337,85 @@ void updatePlayer(const SDLState& state, GameState& gs, Resources& res, GameObje
 	e.velocity = input * e.maxSpeed;
 	e.facing = directionVector(player.direction);
 
-	if (player.state == MovementState::Walking)
-	{
+	int clip = player.state == MovementState::Walking ? Resources::ANUM_WALK : Resources::ANUM_IDLE;
+	playAnimation(e, res.playerTextures, clip, player.direction);
+}
 
-		e.texture = res.texRunning;
-		e.currentAnimation = res.ANUM_PLAYER_WALK;
-	}
-	else
+void startPlayerAttack(GameObject& obj, Resources& res)
+{
+	PlayerData& player = obj.data.player;
+	if (player.attacking)
 	{
-		switch (player.direction)
-		{
-			case Direction::Down:
-			{
-				e.texture = res.texPaulDown;
-				e.currentAnimation = res.ANUM_PLAYER_IDLE_DOWN;
-				break;
-			}
-			case Direction::Up:
-			case Direction::Left:
-			case Direction::Right:
-			{
-				e.texture = res.texIdle;
-				e.currentAnimation = res.ANUM_PLAYER_IDLE;
-			}
-		}
-		
+		return; // no queueing or cancelling: one swing at a time
 	}
+	player.attacking = true;
+	obj.entity.velocity = glm::vec2(0.0f);
+	playAnimation(obj.entity, res.playerTextures, Resources::ANUM_ATTACK, player.direction, /*restart*/true);
+}
+
+// Direction whose axis dominates `v`, for turning towards something.
+Direction dominantDirection(glm::vec2 v)
+{
+	return std::abs(v.x) > std::abs(v.y)
+		? (v.x > 0.0f ? Direction::Right : Direction::Left)
+		: (v.y > 0.0f ? Direction::Down : Direction::Up);
 }
 
 void updateEnemy(const SDLState& state, GameState& gs, Resources& res, GameObject& obj, float deltaTime)
 {
 	engine::Entity& e = obj.entity;
 	EnemyData& enemy = obj.data.enemy;
-	
+
+	// both sprites are the same size, so the gap between positions is the gap between centres
+	glm::vec2 toPlayer = gs.getPlayer().entity.position - e.position;
+	enemy.cooldownLeft = std::max(0.0f, enemy.cooldownLeft - deltaTime);
+
+	switch (enemy.action)
+	{
+		case EnemyAction::Chase:
+			if (enemy.cooldownLeft > 0.0f || glm::length(toPlayer) > ENEMY_ATTACK_RANGE)
+			{
+				break; // keep chasing (below)
+			}
+			// close enough: stop and telegraph the swing
+			enemy.action = EnemyAction::Windup;
+			enemy.windupLeft = ENEMY_ATTACK_WINDUP;
+			[[fallthrough]];
+
+		case EnemyAction::Windup:
+			// stand still, tracking the player so the swing goes where they are now
+			e.velocity = glm::vec2(0.0f);
+			enemy.state = MovementState::Idle;
+			if (toPlayer != glm::vec2(0.0f))
+			{
+				enemy.direction = dominantDirection(toPlayer);
+			}
+			e.facing = directionVector(enemy.direction);
+			enemy.windupLeft -= deltaTime;
+			if (enemy.windupLeft > 0.0f)
+			{
+				playAnimation(e, res.enemyTextures, Resources::ANUM_IDLE, enemy.direction);
+				return;
+			}
+			// direction is locked from here until the swing ends
+			enemy.action = EnemyAction::Attacking;
+			playAnimation(e, res.enemyTextures, Resources::ANUM_ATTACK, enemy.direction, /*restart*/true);
+			return;
+
+		case EnemyAction::Attacking:
+			e.velocity = glm::vec2(0.0f);
+			if (!e.animations[e.currentAnimation].isDone())
+			{
+				return;
+			}
+			enemy.action = EnemyAction::Chase;
+			enemy.cooldownLeft = ENEMY_ATTACK_COOLDOWN;
+			break;
+	}
+
 	// for now will only chase player, but based on interactions can later update path target here
 	gs.pathfinder.setTarget(gs.getPlayer().entity.position, e.id);
 	gs.pathfinder.updatePath(e.id);
-
-	e.texture = res.texEnemy;
-	e.currentAnimation = res.ANUM_ENEMY_IDLE; // only one clip until it has its own walk animation
 
 	// follow the path cell by cell (or hold our cell while the way ahead is taken),
 	// then once the grid can't get us any closer, close in on the exact target position
@@ -326,11 +452,12 @@ void updateEnemy(const SDLState& state, GameState& gs, Resources& res, GameObjec
 	enemy.state = glm::length(move) > 0.001f ? MovementState::Walking : MovementState::Idle;
 	glm::vec2 toFace = enemy.state == MovementState::Walking ? move : targetPosition - e.position;
 	if (toFace != glm::vec2(0.0f)) {
-		enemy.direction = std::abs(toFace.x) > std::abs(toFace.y)
-			? (toFace.x > 0.0f ? Direction::Right : Direction::Left)
-			: (toFace.y > 0.0f ? Direction::Down : Direction::Up);
+		enemy.direction = dominantDirection(toFace);
 	}
 	e.facing = directionVector(enemy.direction);
+
+	int clip = enemy.state == MovementState::Walking ? Resources::ANUM_WALK : Resources::ANUM_IDLE;
+	playAnimation(e, res.enemyTextures, clip, enemy.direction);
 }
 
 void moveAndCollide(GameState& gs, GameObject& obj, float deltaTime)
@@ -441,9 +568,8 @@ void initialiseGameState(const SDLState& state, GameState& gs, Resources& res)
 					player.type = ObjectType::Player;
 					player.data.player = PlayerData();
 					player.entity.position = pos;
-					player.entity.texture = res.texIdle;
 					player.entity.animations = res.playerAnimations;
-					player.entity.currentAnimation = res.ANUM_PLAYER_IDLE;
+					playAnimation(player.entity, res.playerTextures, Resources::ANUM_IDLE, Direction::Down);
 					player.entity.maxSpeed = glm::vec2(120.0f, 120.0f);
 					player.entity.collider = SDL_FRect{ 8, 8, 16, 16 };
 					gs.characters.push_back(player);
@@ -456,9 +582,8 @@ void initialiseGameState(const SDLState& state, GameState& gs, Resources& res)
 					enemy.type = ObjectType::Enemy;
 					enemy.data.enemy = EnemyData();
 					enemy.entity.position = pos;
-					enemy.entity.texture = res.texEnemy;
 					enemy.entity.animations = res.enemyAnimations;
-					enemy.entity.currentAnimation = res.ANUM_ENEMY_IDLE;
+					playAnimation(enemy.entity, res.enemyTextures, Resources::ANUM_IDLE, Direction::Down);
 					enemy.entity.maxSpeed = glm::vec2(60.0f, 60.0f);
 					enemy.entity.collider = SDL_FRect{ 8, 8, 16, 16 };
 					gs.characters.push_back(enemy);
