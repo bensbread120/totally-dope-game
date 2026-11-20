@@ -9,6 +9,10 @@ struct SDLState
 {
 	SDL_Window* window = nullptr;
 	SDL_Renderer* renderer = nullptr;
+	SDL_AudioStream* audiostream = nullptr;
+	SDL_AudioSpec spec;
+	Uint8* wavData = nullptr;
+	Uint32 wavDataLen = 0;
 	int width = 0, height = 0, logW = 0, logH = 0;
 	const bool* keys = nullptr;
 
@@ -17,7 +21,7 @@ struct SDLState
 
 inline bool initialise(SDLState& state, const char* windowTitle)
 {
-	if (!SDL_Init(SDL_INIT_VIDEO))
+	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO))
 	{
 		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", "Error initializing SDL", nullptr);
 		return false;

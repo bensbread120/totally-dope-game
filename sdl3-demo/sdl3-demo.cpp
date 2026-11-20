@@ -79,6 +79,30 @@ struct Resources
 
 		texWall    = tex("panel.png");
 		texFloor   = tex("brick.png");
+
+		// load audio here
+		char* wavPath = nullptr;
+		std::string wavPaths[] = {
+			"sword-attack-slight-crunch-1",
+			"sword-attack-slight-crunch-2",
+			"sword-attack-slight-crunch-3",
+			"sword-attack-slight-crunch-4",
+			"sword-attack-slight-crunch-5"
+		};
+		SDL_asprintf(&wavPath, "%s/assets/audio/sword-attack-slight-crunch-1.wav", SDL_GetBasePath());
+		if (!SDL_LoadWAV(wavPath, &state.spec, &state.wavData, &state.wavDataLen))
+		{
+			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", "Error loading audio files", nullptr);
+		}
+		SDL_free(wavPath);
+
+		state.audiostream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &state.spec, nullptr, nullptr);
+		if (!state.audiostream)
+		{
+			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", SDL_GetError(), nullptr);
+		}
+
+		SDL_ResumeAudioStreamDevice(state.audiostream);
 	}
 
 	void unload() { cache.unload(); }
@@ -132,6 +156,10 @@ int main(int argc, char* argv[])
 	{
 		uint64_t nowTime = SDL_GetTicks();
 		float deltaTime = (nowTime - previousTime) / 1000.0f;
+
+		if (SDL_GetAudioStreamQueued(state.audiostream) < (int)state.wavDataLen) {
+			SDL_PutAudioStreamData(state.audiostream, state.wavData, (int)state.wavDataLen);
+		}
 
 		SDL_Event event{ 0 };
 		while (SDL_PollEvent(&event))
