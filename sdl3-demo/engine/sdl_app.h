@@ -9,10 +9,7 @@ struct SDLState
 {
 	SDL_Window* window = nullptr;
 	SDL_Renderer* renderer = nullptr;
-	SDL_AudioStream* audiostream = nullptr;
 	SDL_AudioSpec spec;
-	Uint8* wavData = nullptr;
-	Uint32 wavDataLen = 0;
 	int width = 0, height = 0, logW = 0, logH = 0;
 	const bool* keys = nullptr;
 

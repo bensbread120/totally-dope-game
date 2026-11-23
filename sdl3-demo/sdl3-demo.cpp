@@ -46,6 +46,25 @@ struct Resources
 		auto tex = [&](const std::string& file) { return cache.load(state.renderer, "assets/" + file); };
 		const char* dirs[] = { "down", "up", "left", "right" };
 
+		// load audio here
+		char* wavPath = nullptr;
+		Sound crummyAttackSound = { };
+		SDL_asprintf(&wavPath, "%s/assets/audio/sword-attack-slight-crunch-1.wav", SDL_GetBasePath());
+		if (!SDL_LoadWAV(wavPath, &state.spec, &crummyAttackSound.wavData, &crummyAttackSound.wavDataLen))
+		{
+			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", "Error loading audio files", nullptr);
+		}
+		SDL_free(wavPath);
+
+		crummyAttackSound.audiostream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &state.spec, nullptr, nullptr);
+		if (!crummyAttackSound.audiostream)
+		{
+			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", SDL_GetError(), nullptr);
+		}
+
+		SDL_ResumeAudioStreamDevice(crummyAttackSound.audiostream);
+
+
 		// Strips are 32x32 frames, except attacks which are 48x48 so the swing
 		// fits; drawObject centres oversized frames on the character's tile.
 		playerAnimations.resize(ANUM_COUNT);
@@ -54,7 +73,7 @@ struct Resources
 		{
 			playerAnimations[ANUM_IDLE + d] = Animation(4, 1.0f);
 			playerAnimations[ANUM_WALK + d] = Animation(4, 0.5f);
-			playerAnimations[ANUM_ATTACK + d] = Animation(4, 0.32f, /*loop*/false);
+			playerAnimations[ANUM_ATTACK + d] = Animation(4, 0.32f, /*loop*/false, crummyAttackSound);
 			// idle down is the hand-drawn original, hence the odd name out
 			playerTextures[ANUM_IDLE + d] = tex(d == 0 ? std::string("paul_down.png") : std::format("paul_idle_{}.png", dirs[d]));
 			playerTextures[ANUM_WALK + d] = tex(std::format("paul_walk_{}.png", dirs[d]));
@@ -79,30 +98,6 @@ struct Resources
 
 		texWall    = tex("panel.png");
 		texFloor   = tex("brick.png");
-
-		// load audio here
-		char* wavPath = nullptr;
-		std::string wavPaths[] = {
-			"sword-attack-slight-crunch-1",
-			"sword-attack-slight-crunch-2",
-			"sword-attack-slight-crunch-3",
-			"sword-attack-slight-crunch-4",
-			"sword-attack-slight-crunch-5"
-		};
-		SDL_asprintf(&wavPath, "%s/assets/audio/sword-attack-slight-crunch-1.wav", SDL_GetBasePath());
-		if (!SDL_LoadWAV(wavPath, &state.spec, &state.wavData, &state.wavDataLen))
-		{
-			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", "Error loading audio files", nullptr);
-		}
-		SDL_free(wavPath);
-
-		state.audiostream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &state.spec, nullptr, nullptr);
-		if (!state.audiostream)
-		{
-			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", SDL_GetError(), nullptr);
-		}
-
-		SDL_ResumeAudioStreamDevice(state.audiostream);
 	}
 
 	void unload() { cache.unload(); }
@@ -113,10 +108,8 @@ struct Resources
 void playAnimation(engine::Entity& e, const std::vector<SDL_Texture*>& textures, int anim, Direction dir, bool restart = false)
 {
 	int idx = anim + dirIndex(dir);
-	if (restart)
-	{
-		e.animations[idx].reset();
-	}
+	Animation& animation = e.animations[idx];
+	animation.play(restart);
 	e.currentAnimation = idx;
 	e.texture = textures[idx];
 }
@@ -156,10 +149,6 @@ int main(int argc, char* argv[])
 	{
 		uint64_t nowTime = SDL_GetTicks();
 		float deltaTime = (nowTime - previousTime) / 1000.0f;
-
-		if (SDL_GetAudioStreamQueued(state.audiostream) < (int)state.wavDataLen) {
-			SDL_PutAudioStreamData(state.audiostream, state.wavData, (int)state.wavDataLen);
-		}
 
 		SDL_Event event{ 0 };
 		while (SDL_PollEvent(&event))
